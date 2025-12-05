@@ -1,5 +1,3 @@
-import argparse
-import os
 import socketserver
 from pathlib import Path
 
@@ -79,16 +77,10 @@ def run_server(host: str, port: int, files_dir: Path) -> None:
         server.serve_forever()
 
 
-def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Simple threaded file server for proxy demo.")
-    parser.add_argument("--host", default="127.0.0.1", help="Bind address for the file server.")
-    parser.add_argument("--port", type=int, default=9001, help="Port for the file server.")
-    parser.add_argument(
-        "--files-dir", type=Path, default=Path("files"), help="Directory containing files to serve."
-    )
-    return parser.parse_args()
-
-
 if __name__ == "__main__":
-    args = parse_args()
-    run_server(args.host, args.port, args.files_dir)
+    # Hardcoded configuration
+    HOST = "127.0.0.1"
+    PORT = 9001
+    FILES_DIR = Path("files")
+
+    run_server(HOST, PORT, FILES_DIR)

@@ -1,6 +1,6 @@
 # Proxy + File Server Demo
 
-This project is a tiny, thread-safe NAT/PAT-style proxy that sits in front of a simple file server. A lightweight CLI client connects to the proxy, which forwards commands to the upstream server and relays responses back. The goal of the project (and this doc) is to explain how the pieces fit together, what protocols/ports are used, and which commands you can run.
+This project is a tiny, thread-safe NAT/PAT-style proxy that sits in front of a simple file server. A lightweight client connects to the proxy, which forwards commands to the upstream server and relays responses back. This doc introduces the pieces, shows how they connect (ports, flow), and lists the commands you can run.
 
 ## Components at a Glance
 
@@ -10,18 +10,20 @@ This project is a tiny, thread-safe NAT/PAT-style proxy that sits in front of a 
 
 ## Connections and Ports
 
-- Default ports:
-  - Proxy listener: `9000` (`--listen-port` in `proxy_server.py`)
-  - File server: `9001` (`--port` in `file_server.py`)
+- Hardcoded ports in code:
+  - Proxy listener: `0.0.0.0:9000` (forwards to the file server)
+  - File server: `127.0.0.1:9001` (serves files from `./files`)
 - Typical flow: `client -> proxy (0.0.0.0:9000) -> file server (127.0.0.1:9001)`
-- You can change hosts/ports via CLI args:
-  ```bash
-  # File server (serves files from ./files by default)
-  python file_server.py --host 127.0.0.1 --port 9001 --files-dir files
+- To change ports/hosts, edit the constants in `proxy_server.py` and `file_server.py`.
 
-  # Proxy (forwards to the file server above)
-  python proxy_server.py --listen-host 0.0.0.0 --listen-port 9000 --server-host 127.0.0.1 --server-port 9001
-  ```
+Start everything (no CLI flags needed):
+```bash
+# File server
+python file_server.py
+
+# Proxy (in another shell)
+python proxy_server.py
+```
 
 Inside the proxy, each inbound client connection is mapped to a temporary NAT entry so responses can be routed back correctly:
 ```python
@@ -55,12 +57,8 @@ The proxy preserves this protocol. For downloads, it streams exactly the number 
 Use the provided client to speak the protocol through the proxy:
 
 ```bash
-# Connect to the proxy (defaults to 127.0.0.1:9000)
+# Connect to the proxy (hardcoded 127.0.0.1:9000)
 python client.py
-
-# One-shot commands before entering the prompt:
-python client.py list
-python client.py download example.txt --out ./downloads/example.txt
 ```
 
 Interactive prompt commands (`proxy>`):

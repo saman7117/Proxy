@@ -1,4 +1,3 @@
-import argparse
 import socket
 import threading
 from dataclasses import dataclass
@@ -165,18 +164,14 @@ class ProxyServer:
         return buffer.decode("utf-8")
 
 
-def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Threaded NAT/PAT proxy for the file server.")
-    parser.add_argument("--listen-host", default="0.0.0.0", help="Proxy bind address.")
-    parser.add_argument("--listen-port", type=int, default=9000, help="Proxy listen port.")
-    parser.add_argument("--server-host", default="127.0.0.1", help="Upstream file server host.")
-    parser.add_argument("--server-port", type=int, default=9001, help="Upstream file server port.")
-    return parser.parse_args()
-
-
 def main() -> None:
-    args = parse_args()
-    proxy = ProxyServer(args.listen_host, args.listen_port, args.server_host, args.server_port)
+    # Hardcoded configuration
+    LISTEN_HOST = "0.0.0.0"
+    LISTEN_PORT = 9000
+    SERVER_HOST = "127.0.0.1"
+    SERVER_PORT = 9001
+
+    proxy = ProxyServer(LISTEN_HOST, LISTEN_PORT, SERVER_HOST, SERVER_PORT)
     proxy.start()
 
 

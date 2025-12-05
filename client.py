@@ -1,4 +1,3 @@
-import argparse
 import shlex
 import socket
 from pathlib import Path
@@ -64,38 +63,12 @@ def download_file(sock: socket.socket, filename: str, dest: Path) -> None:
         raise RuntimeError("Download incomplete")
 
 
-def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Client for the NAT/PAT proxy demo.")
-    parser.add_argument("--proxy-host", default="127.0.0.1", help="Proxy server host.")
-    parser.add_argument("--proxy-port", type=int, default=9000, help="Proxy server port.")
-    subparsers = parser.add_subparsers(dest="command")
-
-    subparsers.add_parser("list", help="Run a single list command before entering the prompt.")
-
-    download_parser = subparsers.add_parser(
-        "download", help="Run a single download command before entering the prompt."
-    )
-    download_parser.add_argument("filename", help="Name of the file to download.")
-    download_parser.add_argument(
-        "--out",
-        type=Path,
-        help="Destination path for the downloaded file (default: same name in current directory).",
-    )
-    return parser.parse_args()
-
-
 def main() -> None:
-    args = parse_args()
-    with socket.create_connection((args.proxy_host, args.proxy_port)) as sock:
-        print(f"Connected to proxy at {args.proxy_host}:{args.proxy_port}")
+    PROXY_HOST = "127.0.0.1"
+    PROXY_PORT = 9000
 
-        # Optional initial command for compatibility with previous CLI.
-        if args.command == "list":
-            _handle_list(sock)
-        elif args.command == "download":
-            destination = args.out or Path(args.filename)
-            _handle_download(sock, args.filename, destination)
-
+    with socket.create_connection((PROXY_HOST, PROXY_PORT)) as sock:
+        print(f"Connected to proxy at {PROXY_HOST}:{PROXY_PORT}")
         _interactive_loop(sock)
 
 
