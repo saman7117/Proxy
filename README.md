@@ -540,17 +540,17 @@ Captured on loopback with filters `tcp.port==9000 || tcp.port==9001`. Control ch
 
 ![List command trace](Wireshark/List1.png)
 
-- 3291 4127 → 9000 SYN: client opens control connection to proxy.
-- 3292 9000 → 4127 SYN/ACK: proxy accepts.
-- 3293 4127 → 9000 ACK: control handshake complete.
-- 6924 9001 → 4127 PSH/ACK len=5: server pushes 5 bytes to client on an existing 9001↔4127 flow; 6925 is the client ACK.
-- 6926 13334 → 9001 SYN: client opens a new data socket to server port 9001; 6927 SYN/ACK, 6928 ACK complete that handshake.
-- 6929 13334 → 9001 PSH/ACK len=5: client sends the `LIST` command payload over the data connection.
-- 6930–6932 9001 → 13334 PSH/ACK: server sends the directory listing data (lengths in the Length column show the payload sizes).
-- 6933 9001 → 13334 FIN/ACK: server signals end-of-data for the listing.
-- 6934 13334 → 9001 ACK: client acknowledges the FIN.
-- 6936–6945 13334 → 9001 PSH/ACK: small trailing client payloads (command terminators/cleanup) with corresponding ACKs (6940, 6942, 6944, 6946, 6947, 6948).
-- 6949 13334 → 9001 FIN/ACK and 6950 9001 → 13334 ACK: client closes the data connection; server acknowledges.
+- 3291 4127 → 9000 (SYN): client asks to open the control connection to the proxy.
+- 3292 9000 → 4127 (SYN/ACK): proxy agrees and acknowledges.
+- 3293 4127 → 9000 (ACK): handshake finishes; control channel is up.
+- 6924 9001 → 4127 (data + ACK, 5 bytes): server sends a small 5-byte chunk on the existing 9001↔4127 flow; 6925 is the client’s acknowledgement of receipt.
+- 6926 13334 → 9001 (SYN): client opens a fresh data socket to the file server; 6927 (SYN/ACK) and 6928 (ACK) finish that handshake.
+- 6929 13334 → 9001 (data + ACK, 5 bytes): client sends the `LIST` command body on the data connection.
+- 6930–6932 9001 → 13334 (data + ACK): server streams back the directory listing; the Length column shows how many bytes are in each piece.
+- 6933 9001 → 13334 (FIN/ACK): server says “no more data coming.”
+- 6934 13334 → 9001 (ACK): client confirms the close request.
+- 6936–6945 13334 → 9001 (small data + ACK): tiny follow-up client segments (command cleanup/terminators) with matching acknowledgements (6940, 6942, 6944, 6946, 6947, 6948).
+- 6949 13334 → 9001 (FIN/ACK) and 6950 9001 → 13334 (ACK): client closes the data connection; server confirms.
 
 Takeaway: the `LIST` verb is sent from client to server on 6929; server replies with the listing across 6930–6932, then closes with 6933. The rest are TCP acks, small client-side payloads, and connection teardowns.
 
@@ -561,15 +561,15 @@ Captured on loopback with filters `tcp.port==9000 || tcp.port==9001`. Control ch
 ![Empty directory LIST trace](Wireshark/NoFiles.png)
 
 - 830 1248 → 9000 SYN; 831 SYN/ACK; 832 ACK: control connection handshake.
-- 897 1249 → 9000 PSH/ACK len=5: client issues `LIST` over the control path; 898 is the proxy ACK.
-- 899 1249 → 9001 SYN; 900 SYN/ACK; 901 ACK: data connection handshake.
-- 902 1249 → 9001 PSH/ACK len=5: client sends the `LIST` command to the file server.
-- 903 9001 → 1249 PSH/ACK: server acknowledges.
-- 904 9001 → 1249 PSH/ACK len=23: server replies `ERR no files available` (23-byte payload).
-- 905 9001 → 1249 PSH/ACK: server acknowledgement after the error payload.
-- 906 1249 → 9001 FIN/ACK; 907 9001 → 1249 ACK: client initiates close after receiving the error.
-- 908–909 9001 → 1249 PSH/ACK: server-side trailing ACKs/zero-length segments completing the shutdown.
-- 910 1249 → 9001 FIN/ACK; 911 9001 → 1249 ACK: final FIN/ACK pair wraps up the data connection.
+- 897 1249 → 9000 (data + ACK, 5 bytes): client issues `LIST` on the control path; 898 is the proxy’s acknowledgement.
+- 899 1249 → 9001 (SYN); 900 (SYN/ACK); 901 (ACK): data connection handshake completes.
+- 902 1249 → 9001 (data + ACK, 5 bytes): client sends the `LIST` command to the file server.
+- 903 9001 → 1249 (ACK): server confirms receipt of the command.
+- 904 9001 → 1249 (data + ACK, 23 bytes): server responds with the text `ERR no files available` (23-byte payload).
+- 905 9001 → 1249 (ACK): acknowledgement for the error payload.
+- 906 1249 → 9001 (FIN/ACK); 907 9001 → 1249 (ACK): client closes the data connection after seeing the error; server confirms.
+- 908–909 9001 → 1249 (ACKs/empty data): trailing acknowledgements as the shutdown completes.
+- 910 1249 → 9001 (FIN/ACK); 911 9001 → 1249 (ACK): final close/confirm pair ends the session cleanly.
 
 Takeaway: when the directory is empty, the client still issues `LIST`, the file server responds immediately with `ERR no files available`, and the connection is torn down without sending any filenames or `END` marker.
 
@@ -580,13 +580,14 @@ Captured on loopback with filters `tcp.port==9000 || tcp.port==9001`. Control ch
 ![Download trace](Wireshark/Download.png)
 
 - 376 1248 → 9000 PSH/ACK len=19: client sends the `DOWNLOAD <file>` request to the proxy.
-- 377 9000 → 1248 ACK: proxy acknowledges the control request.
-- 378–380 8278 ↔ 9001 SYN, SYN/ACK, ACK: data connection established to the file server.
-- 381 8278 → 9001 PSH/ACK len=19: client (through the proxy) forwards the `DOWNLOAD` command to the server.
-- 382 9001 → 8278 PSH/ACK len=6: server begins response header (e.g., `OK <size>\n`); 383 is the client ACK.
-- 384 9001 → 8278 PSH/ACK len=6 and 385 len=23: remaining header plus file payload bytes sent to the client.
-- 386–389 Control-channel ACK/PSH packets as the proxy relays the response back to the client socket on port 1248.
-- 391 9001 → 8278 FIN/ACK: server signals end of transfer; 392 8278 → 9001 FIN/ACK and 393 ACK complete the close.
-- 396–397 show a FIN retransmission and a zero-window ACK during teardown; no additional payload is transferred.
+- 376 1248 → 9000 (data + ACK, 19 bytes): client sends the `DOWNLOAD <file>` request to the proxy over the control channel.
+- 377 9000 → 1248 (ACK): proxy confirms it received the request.
+- 378–380 8278 ↔ 9001 (SYN, SYN/ACK, ACK): a new data connection is opened to the file server and the TCP handshake completes.
+- 381 8278 → 9001 (data + ACK, 19 bytes): the `DOWNLOAD` command is forwarded to the server on the data socket.
+- 382 9001 → 8278 (data + ACK, 6 bytes): server starts its reply with the header (e.g., `OK <size>\n`); 383 is the client’s acknowledgement.
+- 384 9001 → 8278 (data + ACK, 6 bytes) and 385 (data + ACK, 23 bytes): remaining header bytes followed immediately by the first chunk of file data.
+- 386–389 Control-channel packets: acknowledgements as the proxy relays data back to the client’s control-side socket on port 1248.
+- 391 9001 → 8278 (FIN/ACK): server indicates the file is fully sent and it wants to close; 392 (FIN/ACK from client) and 393 (ACK from server) complete the shutdown.
+- 396–397: a retransmitted FIN from the server and a “zero window” acknowledgement from the client during teardown; no extra file data is sent here.
 
 Takeaway: the client issues `DOWNLOAD`, the file server replies with an OK header and file bytes on the data connection, and both sides close cleanly after the transfer (with a brief FIN retransmission/zero-window during shutdown).
