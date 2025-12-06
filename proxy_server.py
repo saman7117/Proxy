@@ -165,7 +165,6 @@ class ProxyServer:
 
 
 def main() -> None:
-    # Hardcoded configuration
     LISTEN_HOST = "0.0.0.0"
     LISTEN_PORT = 9000
     SERVER_HOST = "127.0.0.1"

@@ -27,6 +27,10 @@ def readline(sock: socket.socket) -> str | None:
 def list_files(sock: socket.socket) -> List[str]:
     send_line(sock, "LIST")
     header = readline(sock)
+    if not header:
+        raise RuntimeError("Unexpected empty response")
+    if header.startswith("ERR "):
+        raise RuntimeError(header)
     if header != "OK":
         raise RuntimeError(f"Unexpected response: {header}")
     files = []
@@ -114,7 +118,7 @@ def _interactive_loop(sock: socket.socket) -> None:
                 _handle_download(sock, parts[1], destination)
             else:
                 print('Unknown command. Use "list", "download <filename>", or "exit".')
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:  
             print(f"Command failed: {exc}")
 
 

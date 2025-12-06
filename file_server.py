@@ -30,14 +30,17 @@ class FileRequestHandler(socketserver.BaseRequestHandler):
 
     def _handle_list(self) -> None:
         files = []
-        for path in self.server.files_dir.iterdir():  # type: ignore[attr-defined]
+        for path in self.server.files_dir.iterdir():  
             if path.is_file():
                 files.append(path.name)
+        if not files:
+            self._send_err("no files available")
+            return
         response = "OK\n" + "\n".join(files) + "\nEND\n"
         self.request.sendall(response.encode("utf-8"))
 
     def _handle_download(self, filename: str) -> None:
-        file_path = self.server.files_dir / filename  # type: ignore[attr-defined]
+        file_path = self.server.files_dir / filename 
         if not file_path.exists() or not file_path.is_file():
             self._send_err("file not found")
             return
@@ -72,13 +75,12 @@ def run_server(host: str, port: int, files_dir: Path) -> None:
     handler = FileRequestHandler
     with socketserver.ThreadingTCPServer((host, port), handler) as server:
         server.allow_reuse_address = True
-        server.files_dir = files_dir  # type: ignore[attr-defined]
+        server.files_dir = files_dir  
         print(f"File server listening on {host}:{port}, serving files from {files_dir}")
         server.serve_forever()
 
 
 if __name__ == "__main__":
-    # Hardcoded configuration
     HOST = "127.0.0.1"
     PORT = 9001
     FILES_DIR = Path("files")

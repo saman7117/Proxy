@@ -48,6 +48,7 @@ Responses (from `file_server.py`):
 ```python
 """
 LIST success:      "OK\n" followed by newline-separated filenames then "END\n"
+LIST empty:        "ERR no files available\n"
 DOWNLOAD success:  "OK <size>\n" followed by raw file bytes
 Error:             "ERR <message>\n"
 """
@@ -88,11 +89,14 @@ def _handle_list(self) -> None:
     for path in self.server.files_dir.iterdir():
         if path.is_file():
             files.append(path.name)
+    if not files:
+        self._send_err("no files available")
+        return
     response = "OK\n" + "\n".join(files) + "\nEND\n"
     self.request.sendall(response.encode("utf-8"))
 ```
 
-Walks the configured `files_dir`, filters out non-files (so directory names or sockets don’t leak), builds a deterministic response (`OK`, filenames, `END`). The explicit `END` marker is crucial because TCP is stream-based—without it the client wouldn’t know when the list ends.
+Walks the configured `files_dir`, filters out non-files (so directory names or sockets don’t leak), and short-circuits with `ERR no files available` when the directory is empty to give the client a clear signal. Otherwise, builds a deterministic response (`OK`, filenames, `END`). The explicit `END` marker is crucial because TCP is stream-based—without it the client wouldn’t know when the list ends.
 
 **Download file**
 
@@ -146,6 +150,21 @@ def run_server(host: str, port: int, files_dir: Path) -> None:
 `_send_err` centralizes error formatting so every failure uses the same wire format. `_readline` consumes one byte at a time to gracefully handle packet fragmentation on TCP. `run_server` pre-creates the serving directory, spins up a threaded TCP server (one thread per client), stashes `files_dir` on the server object for handlers to use, and enables `SO_REUSEADDR` to restart cleanly.
 
 ### proxy_server.py
+
+**Initialization**
+
+```python
+class ProxyServer:
+    def __init__(self, listen_host: str, listen_port: int, server_host: str, server_port: int) -> None:
+        self.listen_host = listen_host
+        self.listen_port = listen_port
+        self.server_host = server_host
+        self.server_port = server_port
+        self.nat_table: Dict[int, NATEntry] = {}
+        self.nat_lock = threading.Lock()
+```
+
+Stores the proxy’s bind host/port and the upstream file server host/port. Initializes the shared NAT table and its lock so threads can safely register and look up client mappings during request forwarding.
 
 **Start listener**
 
@@ -497,3 +516,77 @@ Flow for client A running `DOWNLOAD foo.txt`:
 - Shared state: `nat_table`, protected by `nat_lock` for all mutations and lookups.
 - Data flow: per-command upstream sockets use OS-assigned ephemeral ports; these ports are the keys to route responses back to the correct client socket stored in the NAT table.
 - Shutdown: daemon threads allow clean process exit; explicit NAT cleanup prevents dangling mappings even under errors.
+
+## Quickstart (Commands)
+
+```bash
+# Shell 1: start the file server (serves ./files on 127.0.0.1:9001)
+python file_server.py
+
+# Shell 2: start the proxy (listens on 0.0.0.0:9000, forwards to 127.0.0.1:9001)
+python proxy_server.py
+
+# Shell 3: connect a client and interact
+python client.py
+# In the prompt:
+#   list
+#   download example.txt
+#   exit
+
+## Wireshark Trace: LIST Command (Ports 9000/9001)
+
+Captured on loopback with filters `tcp.port==9000 || tcp.port==9001`. Control channel uses client ephemeral port `4127` to proxy `9000`; data channel uses client `13334` to server `9001`.
+
+![List command trace](Wireshark/List1.png)
+
+- 3291 4127 → 9000 SYN: client opens control connection to proxy.
+- 3292 9000 → 4127 SYN/ACK: proxy accepts.
+- 3293 4127 → 9000 ACK: control handshake complete.
+- 6924 9001 → 4127 PSH/ACK len=5: server pushes 5 bytes to client on an existing 9001↔4127 flow; 6925 is the client ACK.
+- 6926 13334 → 9001 SYN: client opens a new data socket to server port 9001; 6927 SYN/ACK, 6928 ACK complete that handshake.
+- 6929 13334 → 9001 PSH/ACK len=5: client sends the `LIST` command payload over the data connection.
+- 6930–6932 9001 → 13334 PSH/ACK: server sends the directory listing data (lengths in the Length column show the payload sizes).
+- 6933 9001 → 13334 FIN/ACK: server signals end-of-data for the listing.
+- 6934 13334 → 9001 ACK: client acknowledges the FIN.
+- 6936–6945 13334 → 9001 PSH/ACK: small trailing client payloads (command terminators/cleanup) with corresponding ACKs (6940, 6942, 6944, 6946, 6947, 6948).
+- 6949 13334 → 9001 FIN/ACK and 6950 9001 → 13334 ACK: client closes the data connection; server acknowledges.
+
+Takeaway: the `LIST` verb is sent from client to server on 6929; server replies with the listing across 6930–6932, then closes with 6933. The rest are TCP acks, small client-side payloads, and connection teardowns.
+
+## Wireshark Trace: LIST Against Empty Directory (Ports 9000/9001)
+
+Captured on loopback with filters `tcp.port==9000 || tcp.port==9001`. Control channel uses client ephemeral port `1248` to proxy `9000`; data channel uses client `1249` to server `9001`.
+
+![Empty directory LIST trace](Wireshark/NoFiles.png)
+
+- 830 1248 → 9000 SYN; 831 SYN/ACK; 832 ACK: control connection handshake.
+- 897 1249 → 9000 PSH/ACK len=5: client issues `LIST` over the control path; 898 is the proxy ACK.
+- 899 1249 → 9001 SYN; 900 SYN/ACK; 901 ACK: data connection handshake.
+- 902 1249 → 9001 PSH/ACK len=5: client sends the `LIST` command to the file server.
+- 903 9001 → 1249 PSH/ACK: server acknowledges.
+- 904 9001 → 1249 PSH/ACK len=23: server replies `ERR no files available` (23-byte payload).
+- 905 9001 → 1249 PSH/ACK: server acknowledgement after the error payload.
+- 906 1249 → 9001 FIN/ACK; 907 9001 → 1249 ACK: client initiates close after receiving the error.
+- 908–909 9001 → 1249 PSH/ACK: server-side trailing ACKs/zero-length segments completing the shutdown.
+- 910 1249 → 9001 FIN/ACK; 911 9001 → 1249 ACK: final FIN/ACK pair wraps up the data connection.
+
+Takeaway: when the directory is empty, the client still issues `LIST`, the file server responds immediately with `ERR no files available`, and the connection is torn down without sending any filenames or `END` marker.
+
+## Wireshark Trace: DOWNLOAD (Ports 9000/9001)
+
+Captured on loopback with filters `tcp.port==9000 || tcp.port==9001`. Control channel uses client ephemeral port `1248` to proxy `9000`; data channel uses client `8278` to server `9001`.
+
+![Download trace](Wireshark/Download.png)
+
+- 376 1248 → 9000 PSH/ACK len=19: client sends the `DOWNLOAD <file>` request to the proxy.
+- 377 9000 → 1248 ACK: proxy acknowledges the control request.
+- 378–380 8278 ↔ 9001 SYN, SYN/ACK, ACK: data connection established to the file server.
+- 381 8278 → 9001 PSH/ACK len=19: client (through the proxy) forwards the `DOWNLOAD` command to the server.
+- 382 9001 → 8278 PSH/ACK len=6: server begins response header (e.g., `OK <size>\n`); 383 is the client ACK.
+- 384 9001 → 8278 PSH/ACK len=6 and 385 len=23: remaining header plus file payload bytes sent to the client.
+- 386–389 Control-channel ACK/PSH packets as the proxy relays the response back to the client socket on port 1248.
+- 391 9001 → 8278 FIN/ACK: server signals end of transfer; 392 8278 → 9001 FIN/ACK and 393 ACK complete the close.
+- 396–397 show a FIN retransmission and a zero-window ACK during teardown; no additional payload is transferred.
+
+Takeaway: the client issues `DOWNLOAD`, the file server replies with an OK header and file bytes on the data connection, and both sides close cleanly after the transfer (with a brief FIN retransmission/zero-window during shutdown).
+```
