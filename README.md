@@ -532,6 +532,7 @@ python client.py
 #   list
 #   download example.txt
 #   exit
+```
 
 ## Wireshark Trace: LIST Command (Ports 9000/9001)
 
@@ -589,4 +590,3 @@ Captured on loopback with filters `tcp.port==9000 || tcp.port==9001`. Control ch
 - 396–397 show a FIN retransmission and a zero-window ACK during teardown; no additional payload is transferred.
 
 Takeaway: the client issues `DOWNLOAD`, the file server replies with an OK header and file bytes on the data connection, and both sides close cleanly after the transfer (with a brief FIN retransmission/zero-window during shutdown).
-```
